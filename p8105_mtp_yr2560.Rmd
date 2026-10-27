@@ -1,0 +1,46 @@
+---
+title: "p8105_mtp_yr2560"
+author: "Yiman Rui"
+date: "2026-10-26"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+## Problem 1 - Data Import
+
+```{r}
+snapshot_files =
+  list.files(
+    path = "data",
+    pattern = "^mcbroken_.*\\.csv$",
+    full.names = TRUE
+  )
+
+mcbroken_df =
+  read_csv(
+    snapshot_files,
+    na = c("", "NA"),
+    show_col_types = FALSE
+  )
+
+store_info_df =
+  read_csv(
+    "data/store_info.csv",
+    show_col_types = FALSE
+  )
+
+state_regions_df =
+  read_csv(
+    "data/state_regions.csv",
+    show_col_types = FALSE
+  )
+```
