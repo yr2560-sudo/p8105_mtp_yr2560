@@ -117,3 +117,87 @@ brokenness_df |>
 ```
 
 There are in total 13792 stores. TX has the most stores with 1,269 while MP has the lowest 2 stores. Among active machine observations, 21,826 out of 151,113 were reported as broken, corresponding to a brokenness rate of approximately 14.44%. 
+
+## Problem 2 - Exploratory Analysis
+
+```{r}
+store_summary_df = 
+  mcbroken_df |>  
+  group_by(store_id, state, city, street, latitude, longitude) |>
+  summarize(
+    n_obs = n(),
+    n_known = sum(!is.na(active)),
+    n_active = sum(active == T, na.rm = T),
+    n_inactive = sum(active == F, na.rm = T),
+    n_broken = sum(broken == T, na.rm = T),
+    .groups = "drop"
+  ) |> 
+  mutate(
+    inactive_rate = ifelse(
+      n_known > 0, n_inactive / n_known, NA_real_
+    ),
+    broken_rate = ifelse(
+      n_active > 0, n_broken / n_active, NA_real_
+    )
+  )
+
+```
+
+Store with few observations
+```{r}
+store_summary_df |> 
+  filter(n_obs < 9) |> 
+  summarize(
+    n_stores = n(),
+    one_observation = sum(n_obs == 1)
+  ) |> 
+  knitr::kable()
+
+store_summary_df |>
+  filter(n_obs < 9) |>
+  arrange(n_obs, store_id) |>
+  slice_head(n = 10) |>
+  select(store_id, state, city, n_obs) |>
+  knitr::kable()
+```
+
+
+```{r}
+# High activity
+store_summary_df |>
+  filter(n_obs >= 9, n_known > 0) |>
+  arrange(desc(inactive_rate)) |>
+  select(store_id, state, city, street,
+         n_obs, n_inactive, n_known, inactive_rate) |>
+  slice_head(n = 6) |>
+  knitr::kable(digits = 3)
+
+# High brokenness
+store_summary_df |>
+  filter(n_obs >= 9, n_active >= 9) |>
+  arrange(desc(broken_rate), desc(n_active)) |>
+  select(store_id, state, city, street,
+         n_obs, n_active, n_broken, broken_rate) |>
+  slice_head(n = 10) |>
+  knitr::kable(digits = 3)
+
+```
+
+```{r}
+# Geographic coordinates
+coordinate_outliers_df =
+  store_summary_df |>
+  filter(
+    !(state %in% c("AK", "HI", "GU", "MP")),
+    !between(latitude, 24, 50) |
+      !between(longitude, -125, -66)
+  ) |>
+  select(store_id, state, city, street,
+         latitude, longitude)
+
+coordinate_outliers_df |>
+  knitr::kable(digits = 3)
+
+```
+
+Among 13,792 stores, 239 have fewer than nine observations, including 40 observed only once.Among stores with at least nine observations, the highest inactivity rate was 90% in Windsor Locks, CT, while several stores reported 100% brokenness across 12 active observations. A geographic check identified three implausible mainland coordinates, suggesting potential data-quality issues. 
