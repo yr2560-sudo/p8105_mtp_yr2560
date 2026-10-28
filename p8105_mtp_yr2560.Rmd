@@ -201,3 +201,152 @@ coordinate_outliers_df |>
 ```
 
 Among 13,792 stores, 239 have fewer than nine observations, including 40 observed only once.Among stores with at least nine observations, the highest inactivity rate was 90% in Windsor Locks, CT, while several stores reported 100% brokenness across 12 active observations. A geographic check identified three implausible mainland coordinates, suggesting potential data-quality issues. 
+
+```{r}
+# Nearest store
+mailman_lat = 40.8421
+mailman_lon = -73.9423
+
+nearest_store_df =
+  store_summary_df |>
+  filter(!is.na(latitude), !is.na(longitude)) |>
+  mutate(
+    distance_km = 111.2 * sqrt(
+      (latitude - mailman_lat)^2 +
+      ((longitude - mailman_lon) *
+         cos(mailman_lat * pi / 180))^2
+    )
+  ) |>
+  arrange(distance_km) |>
+  slice_head(n = 1)
+
+nearest_store_df |>
+  select(store_id, state, city, street, distance_km,
+         n_obs, n_active, n_broken, broken_rate) |>
+  knitr::kable(digits = 3)
+```
+
+```{r}
+# Nearest store history
+mcbroken_df |>
+  filter(store_id == nearest_store_df$store_id[1]) |>
+  arrange(month) |>
+  mutate(
+    status = case_when(
+      is.na(active) | is.na(broken) ~ "Unknown",
+      active == FALSE ~ "Inactive",
+      broken == TRUE ~ "Broken",
+      TRUE ~ "Working"
+    )
+  ) |>
+  select(month,store_id, status) |>
+  knitr::kable()
+```
+
+
+```{r}
+# Highest brokenness in NYC
+nyc_store_df =
+  store_summary_df |>
+  filter(
+    state == "NY",
+    between(latitude, 40.49, 40.92),
+    between(longitude, -74.26, -73.70),
+    !(city %in% c(
+      "Yonkers", "Mount Vernon", "New Rochelle",
+      "Valley Stream", "Lawrence"
+    ))
+  )
+
+nyc_top_df =
+  nyc_store_df |>
+  filter(n_active >= 9) |>
+  filter(
+    broken_rate == max(broken_rate, na.rm = TRUE)
+  ) |>
+  arrange(desc(n_active))
+
+nyc_top_df |>
+  select(store_id, city, street, n_active,
+         n_broken, broken_rate) |>
+  knitr::kable(digits = 3)
+```
+
+The closest store to Mailman is at 4040 Broadway, with a brokenness rate of 8.33% (1/12), occurring in September 2026. Four NYC stores reported 100% brokenness among at least nine active observations.
+
+
+```{r}
+# Monthly status transitions
+transition_df =
+  mcbroken_df |>
+  arrange(store_id, month) |>
+  group_by(store_id) |>
+  mutate(
+    previous_month = lag(month),
+    previous_active = lag(active),
+    previous_broken = lag(broken)
+  ) |>
+  ungroup() |>
+  filter(
+    month == previous_month + lubridate::period(months = 1),    
+    active == TRUE,
+    previous_active == TRUE,
+    !is.na(broken),
+    !is.na(previous_broken)
+  ) |>
+  mutate(
+    previous_status = if_else(
+      previous_broken, "Broken", "Working"
+    ),
+    current_status = if_else(
+      broken, "Broken", "Working"
+    )
+  ) |>
+  count(previous_status, current_status) |>
+  pivot_wider(
+    names_from = current_status,
+    values_from = n,
+    values_fill = 0
+  ) |>
+  mutate(
+    previous_status = factor(
+      previous_status,
+      levels = c("Working", "Broken")
+    )
+  ) |>
+  arrange(previous_status) |>
+  select(previous_status, Working, Broken)
+
+transition_df |>
+  knitr::kable()
+```
+
+Among machines working in the previous month, 101,446 remained working and 8,176 became broke. Among previously broken machines, 7,918 were repaired, while 10,521 remained broken. These results suggest that machine failures often persit across month snapshots. 
+
+```{r}
+# Regional brokenness
+region_month_df =
+  mcbroken_df |>
+  filter(active == TRUE, !is.na(broken)) |>
+  group_by(region, month) |>
+  summarize(
+    broken_rate = 100 * mean(broken),
+    .groups = "drop"
+  ) |>
+  mutate(
+    month = format(month, "%b %y")
+  ) |>
+  pivot_wider(
+    names_from = month,
+    values_from = broken_rate
+  ) |>
+  arrange(region)
+
+region_month_df |>
+  knitr::kable(
+    digits = 1,
+    caption = "Monthly brokenness rates (%) by region"
+  )
+```
+
+Brokenness rates varied across regions and months, with Alaska reaching 47.8% in August 2026, while the Ohio Valley remained relatively stable at approximately 12–15%.
