@@ -15,6 +15,10 @@ knitr::opts_chunk$set(
 )
 ```
 
+## Introduction
+
+This project examines McDonald's ice cream machine reliability across the United States using monthly data from November 2025 to October 2026. The analysis focuses on data quality, machine brokenness, temporal changes, and geographic differences in machine performance.
+
 ## Problem 1 - Data Import
 
 ```{r}
@@ -116,7 +120,7 @@ brokenness_df |>
   knitr::kable(digits = 4)
 ```
 
-There are in total 13792 stores. TX has the most stores with 1,269 while MP has the lowest 2 stores. Among active machine observations, 21,826 out of 151,113 were reported as broken, corresponding to a brokenness rate of approximately 14.44%. 
+The dataset contains 13,792 stores. Texas has the most (1,269), while Vermont has the fewest (25) among U.S. states. Including territories, the Northern Mariana Islands has the fewest (2). Among active machine observations, the brokenness rate was 14.44% (21,826/151,113).
 
 ## Problem 2 - Exploratory Analysis
 
@@ -163,7 +167,7 @@ store_summary_df |>
 
 
 ```{r}
-# High activity
+# High inactivity
 store_summary_df |>
   filter(n_obs >= 9, n_known > 0) |>
   arrange(desc(inactive_rate)) |>
@@ -172,7 +176,7 @@ store_summary_df |>
   slice_head(n = 6) |>
   knitr::kable(digits = 3)
 
-# High brokenness
+# High brokenness filter
 store_summary_df |>
   filter(n_obs >= 9, n_active >= 9) |>
   arrange(desc(broken_rate), desc(n_active)) |>
@@ -260,7 +264,7 @@ nyc_store_df =
 
 nyc_top_df =
   nyc_store_df |>
-  filter(n_active >= 9) |>
+  filter(n_active > 0) |>
   filter(
     broken_rate == max(broken_rate, na.rm = TRUE)
   ) |>
@@ -272,7 +276,7 @@ nyc_top_df |>
   knitr::kable(digits = 3)
 ```
 
-The closest store to Mailman is at 4040 Broadway, with a brokenness rate of 8.33% (1/12), occurring in September 2026. Four NYC stores reported 100% brokenness among at least nine active observations.
+The closest store to Mailman is at 4040 Broadway, with a brokenness rate of 8.33% (1/12), occurring in September 2026. Five NYC stores reported 100% brokenness, although one had only three active observations.
 
 
 ```{r}
@@ -321,7 +325,7 @@ transition_df |>
   knitr::kable()
 ```
 
-Among machines working in the previous month, 101,446 remained working and 8,176 became broke. Among previously broken machines, 7,918 were repaired, while 10,521 remained broken. These results suggest that machine failures often persit across month snapshots. 
+Among previously working machines, 101,446 remained working and 8,176 became broken. Among previously broken machines, 7,918 were repaired, while 10,521 remained broken. These results suggest that machine failures often persist across monthly snapshots.
 
 ```{r}
 # Regional brokenness
@@ -350,3 +354,180 @@ region_month_df |>
 ```
 
 Brokenness rates varied across regions and months, with Alaska reaching 47.8% in August 2026, while the Ohio Valley remained relatively stable at approximately 12–15%.
+
+## Problem 3
+
+```{r, fig.width=8, fig.height=10}
+# Brokenness by state
+state_month_df =
+  mcbroken_df |>
+  filter(active == TRUE, !is.na(broken)) |>
+  group_by(state, month) |>
+  summarize(
+    broken_rate = mean(broken),
+    .groups = "drop"
+  ) |>
+  mutate(
+    month_label = factor(
+      format(month, "%b %y"),
+      levels = format(
+        sort(unique(mcbroken_df$month)),
+        "%b %y"
+      )
+    )
+  )
+
+state_month_df |>
+  ggplot(aes(
+    x = month_label,
+    y = state,
+    fill = broken_rate
+  )) +
+  geom_tile(color = "white", linewidth = 0.2) +
+  scale_fill_viridis_c(
+    labels = scales::percent_format(),
+    name = "Brokenness"
+  ) +
+  labs(
+    title = "Monthly Brokenness Rate by State",
+    x = "Month",
+    y = "State"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(
+      angle = 45, hjust = 1
+    ),
+    axis.text.y = element_text(size = 8),
+    panel.grid = element_blank(),
+    legend.position = "bottom"
+  )
+```
+Brokenness rates were generally low across most states and months, although some states experienced substantial monthly spikes, indicating temporal variation. 
+
+```{r,fig.width=9, fig.height=12, out.width="100%"}
+store_avg_df =
+  mcbroken_df |>
+  group_by(
+    store_id, state, city, street,
+    latitude, longitude
+  ) |>
+  summarize(
+    n_active = sum(active == TRUE, na.rm = TRUE),
+    avg_broken = mean(
+      broken[active == TRUE], na.rm = TRUE
+    ),
+    .groups = "drop"
+  ) |>
+  mutate(
+    avg_broken = if_else(
+      is.nan(avg_broken),
+      NA_real_,
+      avg_broken
+    )
+  )
+
+# boxplot
+store_avg_df |>
+  filter(!is.na(avg_broken)) |>
+  mutate(
+    state = fct_reorder(
+      state, avg_broken, .fun = mean
+    )
+  ) |>
+  ggplot(aes(
+    x = state,
+    y = avg_broken
+  )) +
+  geom_boxplot(
+    fill = "lightblue",
+    outlier.alpha = 0.15,
+    outlier.size = 0.6
+  ) +
+  coord_flip() +
+  scale_y_continuous(
+    labels = scales::percent_format()
+  ) +
+  labs(
+    title = "Distribution of Store-Level Brokenness by State",
+    x = "State",
+    y = "Average Brokenness Rate"
+  ) +
+  theme_minimal()
+```
+
+Store-level brokenness rates varied considerably within states. Alaska and Hawaii showed relatively high average brokenness, while many states had lower medians but some stores with exceptionally high rates.
+
+```{r,fig.width=15, fig.height=6, out.width="100%"}
+# geographic coordinates
+library(patchwork)
+
+continental_df =
+  store_avg_df |>
+  filter(
+    !(state %in% c("AK", "HI", "GU", "MP")),
+    between(latitude, 24, 50),
+    between(longitude, -125, -66)
+  )
+
+nyc_plot_df =
+  store_avg_df |>
+  semi_join(
+    nyc_store_df |> select(store_id),
+    by = "store_id"
+  )
+
+# two panel plots
+us_plot =
+  continental_df |>
+  ggplot(aes(
+    x = longitude,
+    y = latitude,
+    color = avg_broken
+  )) +
+  geom_point(size = 0.6, alpha = 0.7) +
+  scale_color_viridis_c(
+    limits = c(0, 1),
+    labels = scales::percent_format(),
+    na.value = "grey70",
+    name = "Brokenness"
+  ) +
+  coord_quickmap() +
+  labs(
+    title = "Contiguous United States",
+    x = "Longitude",
+    y = "Latitude"
+  ) +
+  theme_minimal()
+
+nyc_plot =
+  nyc_plot_df |>
+  ggplot(aes(
+    x = longitude,
+    y = latitude,
+    color = avg_broken
+  )) +
+  geom_point(size = 2, alpha = 0.8) +
+  scale_color_viridis_c(
+    limits = c(0, 1),
+    labels = scales::percent_format(),
+    na.value = "grey70",
+    name = "Brokenness"
+  ) +
+  coord_quickmap() +
+  labs(
+    title = "New York City",
+    x = "Longitude",
+    y = "Latitude"
+  ) +
+  theme_minimal()
+
+(us_plot | nyc_plot) +
+  plot_layout(
+    widths = c(1.4, 1),
+    guides = "collect"
+  ) &
+  theme(legend.position = "bottom")
+```
+
+Stores were more densely concentrated in the eastern United States and major urban areas. Within NYC, brokenness rates varied across nearby stores, suggesting no clear uniform geographic pattern.
